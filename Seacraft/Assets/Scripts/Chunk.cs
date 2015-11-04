@@ -7,15 +7,14 @@ using SimplexNoise;
 [RequireComponent (typeof(MeshCollider))]
 [RequireComponent (typeof(MeshFilter))]
 public class Chunk : MonoBehaviour {
-
+	
 	public static List<Chunk> chunks = new List<Chunk>();
-	public static int width{
-		get{ return World.currentWorld.chunkWidth;}
+	public static int width {
+		get { return World.currentWorld.chunkWidth; }
 	}
-	public static int height{
-		get{ return World.currentWorld.chunkHeight;}
+	public static int height {
+		get { return World.currentWorld.chunkHeight; }
 	}
-
 	public byte[,,] map;
 	public Mesh visualMesh;
 	protected MeshRenderer meshRenderer;
@@ -24,45 +23,17 @@ public class Chunk : MonoBehaviour {
 
 	// Use this for initialization
 	void Start () {
-
-		chunks.Add (this);
-
+		
+		chunks.Add(this);
+		
 		meshRenderer = GetComponent<MeshRenderer>();
 		meshCollider = GetComponent<MeshCollider>();
 		meshFilter = GetComponent<MeshFilter>();
 		
 		
 	
-		map = new byte[width, height, width];
-
-		Random.seed = World.currentWorld.seed;
-		Vector3 offset = new Vector3 (Random.value*10000, Random.value*10000,Random.value*10000);
-
-		for (int x = 0; x < width; x++)
-		{
-			float noiseX = Mathf.Abs (((float)x + transform.position.x + offset.x) / 20);
-					
-			for (int y = 0; y < height; y++)
-			{
-				float noiseY = Mathf.Abs (((float) y + transform.position.y + offset.y) / 20);
-			
-				for (int z = 0; z < width; z++)
-				{
-					float noiseZ = Mathf.Abs (((float) z + transform.position.z + offset.z) / 20);
-					
-					float noiseValue = Noise.Generate(noiseX, noiseY, noiseZ);
-					
-					noiseValue += (10f - (float)y) / 10;
-					
-					
-					if (noiseValue > 0.2f)
-						map[x, y, z] = 1;
-				
-				}
-			}
-		}
-		
-		StartCoroutine(CreateVisualMesh() );
+		CalculateMapFromScratch();
+		StartCoroutine(CreateVisualMesh());
 		
 	}
 	
@@ -70,6 +41,86 @@ public class Chunk : MonoBehaviour {
 	void Update () {
 	
 	}
+	
+	public static byte GetTheoreticalByte(Vector3 pos) {
+		Random.seed = World.currentWorld.seed;
+		
+		Vector3 grain0Offset = new Vector3(Random.value * 10000, Random.value * 10000, Random.value * 10000);
+		Vector3 grain1Offset = new Vector3(Random.value * 10000, Random.value * 10000, Random.value * 10000);
+		Vector3 grain2Offset = new Vector3(Random.value * 10000, Random.value * 10000, Random.value * 10000);
+		
+		return GetTheoreticalByte(pos, grain0Offset, grain1Offset, grain2Offset);
+		
+	}
+	
+	public static byte GetTheoreticalByte(Vector3 pos, Vector3 offset0, Vector3 offset1, Vector3 offset2)
+	{
+		
+		float heightBase = 10;
+		float maxHeight = height - 10;
+		float heightSwing = maxHeight - heightBase;
+		
+		byte brick = 1;
+					
+		float clusterValue = CalculateNoiseValue(pos, offset1,  0.02f);
+		float blobValue = CalculateNoiseValue(pos, offset1,  0.05f);
+		float mountainValue = CalculateNoiseValue(pos, offset0,  0.009f);
+		if ( (mountainValue == 0) && (blobValue < 0.2f) )
+			brick = 3;
+		else if (clusterValue > 0.9f)
+			brick = 4;
+		else if (clusterValue > 0.8f)
+			brick = 2;
+				
+		mountainValue = Mathf.Sqrt(mountainValue);
+		
+		mountainValue *= heightSwing;
+		mountainValue += heightBase;
+					
+		mountainValue += (blobValue * 10) - 5f;
+					
+					
+					
+		if (mountainValue >= pos.y)
+			return brick;
+		return 0;
+	}
+	
+	public virtual void CalculateMapFromScratch() {
+		map = new byte[width, height, width];
+		
+		Random.seed = World.currentWorld.seed;
+		Vector3 grain0Offset = new Vector3(Random.value * 10000, Random.value * 10000, Random.value * 10000);
+		Vector3 grain1Offset = new Vector3(Random.value * 10000, Random.value * 10000, Random.value * 10000);
+		Vector3 grain2Offset = new Vector3(Random.value * 10000, Random.value * 10000, Random.value * 10000);
+		
+		
+		
+		for (int x = 0; x < World.currentWorld.chunkWidth; x++)
+		{
+			for (int y = 0; y < height; y++)
+			{
+				for (int z = 0; z < width; z++)
+				{
+					map[x, y, z] = GetTheoreticalByte(new Vector3(x, y, z) + transform.position);
+				
+				}
+			}
+		}
+		
+	}
+	
+	public static float CalculateNoiseValue(Vector3 pos, Vector3 offset, float scale)
+	{
+		
+		float noiseX = Mathf.Abs((pos.x + offset.x) * scale);
+		float noiseY = Mathf.Abs((pos.y + offset.y) * scale);
+		float noiseZ = Mathf.Abs((pos.z + offset.z) * scale);
+		
+		return Mathf.Max(0, Noise.Generate(noiseX, noiseY, noiseZ));
+		
+	}
+	
 	
 	public virtual IEnumerator CreateVisualMesh() {
 		visualMesh = new Mesh();
@@ -108,6 +159,8 @@ public class Chunk : MonoBehaviour {
 					// Front
 					if (IsTransparent(x, y, z + 1))
 						BuildFace (brick, new Vector3(x, y, z + 1), Vector3.up, Vector3.right, false, verts, uvs, tris);
+					
+					
 				}
 			}
 		}
@@ -119,10 +172,12 @@ public class Chunk : MonoBehaviour {
 		visualMesh.RecalculateNormals();
 		
 		meshFilter.mesh = visualMesh;
+		
+		meshCollider.sharedMesh = null;
 		meshCollider.sharedMesh = visualMesh;
-
+		
 		yield return 0;
-
+		
 	}
 	public virtual void BuildFace(byte brick, Vector3 corner, Vector3 up, Vector3 right, bool reversed, List<Vector3> verts, List<Vector2> uvs, List<int> tris)
 	{
@@ -132,13 +187,14 @@ public class Chunk : MonoBehaviour {
 		verts.Add (corner + up);
 		verts.Add (corner + up + right);
 		verts.Add (corner + right);
-
-		//For the texture map
-		Vector2 uvWidth = new Vector2 (0.17f, 0.17f);
-		Vector2 uvCorner = new Vector2 (0.04f, 0.79f);
-
+		
+		Vector2 uvWidth = new Vector2(0.25f, 0.25f);
+		Vector2 uvCorner = new Vector2(0.00f, 0.75f);
+		
+		uvCorner.x += (float)(brick - 1) / 4;
+		
 		uvs.Add(uvCorner);
-		uvs.Add(new Vector2(uvCorner.x, uvCorner.y +uvWidth.y));
+		uvs.Add(new Vector2(uvCorner.x, uvCorner.y + uvWidth.y));
 		uvs.Add(new Vector2(uvCorner.x + uvWidth.x, uvCorner.y + uvWidth.y));
 		uvs.Add(new Vector2(uvCorner.x + uvWidth.x, uvCorner.y));
 		
@@ -164,36 +220,58 @@ public class Chunk : MonoBehaviour {
 	}
 	public virtual bool IsTransparent (int x, int y, int z)
 	{
+		if ( y < 0) return false;
 		byte brick = GetByte(x,y,z);
 		switch (brick)
 		{
-		default:
 		case 0: 
 			return true;
-			
-		case 1: return false;
+		default:
+			return false;
 		}
 	}
 	public virtual byte GetByte (int x, int y , int z)
 	{
-		if ( (x < 0) || (y < 0) || (z < 0) || (y >= height) || (x >= width) || (z >= width))
+		
+		if ((y < 0) || (y >= height))
 			return 0;
+		
+		if ( (x < 0) || (z < 0)  || (x >= width) || (z >= width))
+		{
+			
+			Vector3 worldPos = new Vector3(x, y, z) + transform.position;
+			Chunk chunk = Chunk.FindChunk(worldPos);
+			if (chunk == this) return 0;
+			if (chunk == null) 
+			{
+				return GetTheoreticalByte(worldPos);
+			}
+			return chunk.GetByte (worldPos);
+		}
 		return map[x,y,z];
 	}
-
-	public static Chunk FindChunk(Vector3 pos){
-
-		for (int a = 0; a< chunks.Count; a++) {
-			Vector3 cpos = chunks[a].transform.position;
-
-			//No stacking of chunks on the y axis but can be added easily
-			if((pos.x< cpos.x) || (pos.z< cpos.z) || (pos.x>= cpos.x + width) || (pos.z>= cpos.z + width)) continue;
-			return chunks[a];
-		}
-	return null;
+	public virtual byte GetByte(Vector3 worldPos) {
+		worldPos -= transform.position;
+		int x = Mathf.FloorToInt(worldPos.x);
+		int y = Mathf.FloorToInt(worldPos.y);
+		int z = Mathf.FloorToInt(worldPos.z);
+		return GetByte (x, y, z);
 	}
-
-
+	
+	public static Chunk FindChunk(Vector3 pos) {
+		
+		for (int a = 0; a < chunks.Count; a++)
+		{
+			Vector3 cpos = chunks[a].transform.position;
+			
+			if ( ( pos.x < cpos.x) || (pos.z < cpos.z) || (pos.x >= cpos.x + width) || (pos.z >= cpos.z + width) ) continue;
+			return chunks[a];
+			
+		}
+		return null;
+		
+	}
+	
 }
 
 
